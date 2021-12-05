@@ -1,0 +1,197 @@
+
+import random
+
+// Data is put here.
+// Everything except textures belongs in here.
+// Textures should instead by put inside the 'Textures' struct
+struct GameData (
+    stage Stage,
+    items <Item> List,
+    shop <Item> List,
+    opponent <Item> List,
+    finished bool,
+    our_wins, opponent_wins int
+) {
+    func load {
+        this.stage = Stage::PICK
+        this.refreshShop()
+        this.finished = false
+        this.our_wins = 0
+        this.opponent_wins = 0
+    }
+
+    func drawScore {
+        captDrawText(sprintf("%d - %d", this.our_wins, this.opponent_wins), 8.0f, 8.0f)
+    }
+
+    func refreshShop {
+        this.shop.clear()
+
+        repeat static 5 {
+            this.shop.add(randomItem())
+        }
+    }
+    
+    func reset {
+        this.__defer__()
+        memset(this, 0, sizeof(*this))
+        this.load()
+    }
+
+    func prepareAnimation {
+        this.opponent.clear()
+        repeat static 5, this.opponent.add(randomItem())
+        this.finished = false
+    }
+
+    func progress {
+        unless this.stage == Stage::BATTLE, return
+        if this.finished, return
+
+        if this.items.length == 0 || this.opponent.length == 0 {
+            this.finished = true
+
+            if this.items.length != this.opponent.length {
+                if this.items.length > this.opponent.length {
+                    this.our_wins++
+                } else {
+                    this.opponent_wins++
+                }
+            }
+            return
+        }
+
+        our_score int = this.items.calculateScore(&this.opponent)
+        opponent_score int = this.opponent.calculateScore(&this.items)
+
+        if our_score == opponent_score {
+            this.items.remove(0)
+            this.opponent.remove(0)
+        } else if our_score > opponent_score {
+            this.opponent.remove(0)
+        } else {
+            this.items.remove(0)
+        }
+    }
+}
+
+enum Stage (PICK, BATTLE)
+enum ItemKind (BOW, DIAMOND_KEY, EMPTY, GOLD_ARROW, GOLD_AXE, GOLD_KEY, IRON_ARROW, IRON_AXE, IRON_KEY)
+
+record Item (kind ItemKind, bonus int) {
+    func getTexture CaptTexture {
+        exhaustive switch this.kind {
+            case ItemKind::BOW, return textures.bow
+            case ItemKind::DIAMOND_KEY, return textures.diamond_key
+            case ItemKind::EMPTY, return textures.empty
+            case ItemKind::GOLD_ARROW, return textures.gold_arrow
+            case ItemKind::GOLD_AXE, return textures.gold_axe
+            case ItemKind::GOLD_KEY, return textures.gold_key
+            case ItemKind::IRON_ARROW, return textures.iron_arrow
+            case ItemKind::IRON_AXE, return textures.iron_axe
+            case ItemKind::IRON_KEY, return textures.iron_key
+        }
+        return textures.acorn
+    }
+
+    func getDefaultScore int {
+        exhaustive switch this.kind {
+            case ItemKind::BOW, return 0
+            case ItemKind::DIAMOND_KEY, return 3
+            case ItemKind::EMPTY, return 0
+            case ItemKind::GOLD_ARROW, return 2
+            case ItemKind::GOLD_AXE, return 2
+            case ItemKind::GOLD_KEY, return 2
+            case ItemKind::IRON_ARROW, return 1
+            case ItemKind::IRON_AXE, return 1
+            case ItemKind::IRON_KEY, return 1
+        }
+        return 0
+    }
+
+    func getTooltip String {
+        value String
+        exhaustive switch this.kind {
+            case ItemKind::BOW, value = "Worth 0 + %\nGains +2 when next to iron arrow\nGains +3 when next to gold arrow"
+            case ItemKind::DIAMOND_KEY, value = "Worth 3 + %\nGains +5 versus axes"
+            case ItemKind::EMPTY, value =  "Worth 0 + %"
+            case ItemKind::GOLD_ARROW, value =  "Worth 2 + %\nGains +4 when next to bow"
+            case ItemKind::GOLD_AXE, value =   "Worth 2 + %\nGains +5 versus arrows"
+            case ItemKind::GOLD_KEY, value =  "Worth 2 + %\nGains +4 versus axes"
+            case ItemKind::IRON_ARROW, value =  "Worth 1 + %\nGains +3 when next to bow"
+            case ItemKind::IRON_AXE, value =   "Worth 1 + %\nGains +5 versus arrows"
+            case ItemKind::IRON_KEY, value =  "Worth 1 + %\nGains +3 versus axes"
+        }
+        return value % this.bonus
+    }
+}
+
+func Item(kind ItemKind) Item {
+    item POD Item
+    item.kind = kind
+    item.bonus = randomInt(5)
+    return item
+}
+
+func randomItem Item {
+    item Item = Item(ItemKind::EMPTY)
+    while item.kind == ItemKind::EMPTY, item = Item(randomInt(9) as ItemKind)
+    return item
+}
+
+func calculateScore(this *<Item> List, opponent *<Item> List) int {
+    if opponent.length == 0 || this.length == 0, return 0
+
+    facing *Item = opponent.getPointer(0)
+    self *Item = this.getPointer(0)
+    next *Item = this.length > 1 ? this.getPointer(1) : null as *Item
+
+    score int = self.bonus + self.getDefaultScore()
+
+    // Bows and arrow benefit from each other
+    if next != null && self.kind == ItemKind::BOW {
+        if next.kind == ItemKind::IRON_ARROW, score += 2
+        if next.kind == ItemKind::GOLD_ARROW, score += 3
+    }
+
+    if next != null && self.kind == ItemKind::IRON_ARROW {
+        if next.kind == ItemKind::BOW, score += 3
+    }
+
+    if next != null && self.kind == ItemKind::GOLD_ARROW {
+        if next.kind == ItemKind::BOW, score += 4
+    }
+
+    // Axes do well against arrows
+    if self.kind == ItemKind::IRON_AXE {
+        if facing.kind == ItemKind::IRON_ARROW || facing.kind == ItemKind::GOLD_ARROW {
+            score += 4
+        }
+    }
+    if self.kind == ItemKind::GOLD_AXE {
+        if facing.kind == ItemKind::IRON_ARROW || facing.kind == ItemKind::GOLD_ARROW {
+        score += 5
+        }
+    }
+
+    // Keys do well against axes and arrows
+    if self.kind == ItemKind::IRON_KEY {
+        if facing.kind == ItemKind::IRON_AXE || facing.kind == ItemKind::GOLD_AXE {
+            score += 3;
+        }
+    }
+    if self.kind == ItemKind::GOLD_KEY {
+        if facing.kind == ItemKind::IRON_AXE || facing.kind == ItemKind::GOLD_AXE {
+            score += 4;
+        }
+    }
+    if self.kind == ItemKind::DIAMOND_KEY {
+        if facing.kind == ItemKind::IRON_AXE || facing.kind == ItemKind::GOLD_AXE {
+            score += 5;
+        }
+    }
+
+    return score
+}
+
+gamedata GameData
